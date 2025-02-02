@@ -1,0 +1,13 @@
+[package]
+name = "bevy_astroid_evader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.15.1"
+rand = "0.9.0"
+
+
+# Enable max optimizations for dependencies, but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
