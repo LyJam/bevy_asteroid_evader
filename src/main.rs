@@ -25,6 +25,12 @@ struct Asteroid;
 struct HasDrag;
 
 #[derive(Component)]
+struct TargetPosition(Vec2);
+
+#[derive(Component)]
+struct CurrentPosition(Vec2);
+
+#[derive(Component)]
 struct Velocity {
     velocity: Vec2,
 }
@@ -66,6 +72,7 @@ fn main() {
             )
                 .chain(),
         )
+        .add_systems(Update, update_position)
         .run();
 }
 
@@ -75,11 +82,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut spaceship_sprite = Sprite::from_image(asset_server.load("Sprites/spaceship.png"));
     spaceship_sprite.custom_size = Some(Vec2::new(SPACESHIP_SIZE, SPACESHIP_SIZE));
 
-    let mut spaceship = commands.spawn(spaceship_sprite);
+    let position = Vec2::new(0.0, 0.0);
 
-    spaceship.insert(Spaceship);
-    spaceship.insert(Velocity::new(0.0, 0.0));
-    spaceship.insert(HasDrag);
+    commands.spawn((
+        spaceship_sprite,
+        Transform::from_xyz(position.x, position.y, 0.0),
+        CurrentPosition(position),
+        TargetPosition(position),
+        Spaceship,
+        Velocity::new(0.0, 0.0),
+        HasDrag,
+    ));
 }
 
 fn register_resetfn(mut commands: Commands) {
@@ -159,11 +172,14 @@ fn spawn_asteroids(
 
         let transform = Transform::from_xyz(spawn_x, spawn_y, 0.0);
 
-        let mut asteroid = commands.spawn((asteroid_sprite, transform));
-
-        asteroid.insert(Velocity::new(velocity.x, velocity.y));
-
-        asteroid.insert(Asteroid);
+        commands.spawn((
+            asteroid_sprite,
+            transform,
+            Velocity::new(velocity.x, velocity.y),
+            Asteroid,
+            CurrentPosition(Vec2::new(spawn_x, spawn_y)),
+            TargetPosition(Vec2::new(spawn_x, spawn_y)),
+        ));
 
         total_asteroids += 1;
     }
@@ -225,17 +241,29 @@ fn player_input(
     }
 }
 
-fn move_objects(mut objects: Query<(&mut Transform, &Velocity)>) {
-    for (mut transform, velocity) in objects.iter_mut() {
-        transform.translation.x += velocity.velocity.x;
-        transform.translation.y += velocity.velocity.y;
+fn move_objects(mut objects: Query<(&mut CurrentPosition, &mut TargetPosition, &Velocity)>) {
+    for (mut current, mut target, velocity) in objects.iter_mut() {
+        current.0 = target.0;
+
+        target.0 += velocity.velocity;
     }
 }
 
-fn apply_drag(mut objects: Query<&mut Transform, With<HasDrag>>) {
-    for mut transform in objects.iter_mut() {
-        transform.translation.x = transform.translation.x * DRAG;
-        transform.translation.y = transform.translation.y * DRAG;
+fn apply_drag(mut objects: Query<&mut Velocity, With<HasDrag>>) {
+    for mut velocity in objects.iter_mut() {
+        velocity.velocity.x *= DRAG;
+        velocity.velocity.y *= DRAG;
+    }
+}
+
+fn update_position(
+    fixed_time: Res<Time<Fixed>>,
+    mut objects: Query<(&mut Transform, &CurrentPosition, &TargetPosition)>,
+) {
+    for (mut transform, current, target) in &mut objects {
+        let a = fixed_time.overstep_fraction();
+
+        transform.translation = current.0.lerp(target.0, a).extend(0.0);
     }
 }
 
