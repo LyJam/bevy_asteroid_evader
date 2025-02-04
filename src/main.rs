@@ -1,3 +1,7 @@
+use bevy::ecs::system::{RunSystemOnce, SystemId};
+use bevy::math::vec2;
+use bevy::render::render_resource::encase::private::SizeValue;
+use bevy::state::commands;
 use bevy::window::{Window, WindowMode};
 use bevy::{prelude::*, transform, window::PrimaryWindow};
 use rand::Rng;
@@ -7,6 +11,9 @@ const DRAG: f32 = 0.96;
 const ASTEROID_COUNT: usize = 10;
 const ASTROID_SPEED_MIN: f32 = 1.5;
 const ASTROID_SPEED_MAX: f32 = 4.0;
+const SPACESHIP_SIZE: f32 = 50.0;
+const ASTROID_SIZE: f32 = 80.0;
+const COLLISION_MARIGN: f32 = 25.0; // tolerance granted in overlap before it is defined as a collision
 
 #[derive(Component)]
 struct Spaceship;
@@ -21,6 +28,9 @@ struct HasDrag;
 struct Velocity {
     velocity: Vec2,
 }
+
+#[derive(Resource)]
+struct ResetGame(SystemId);
 
 impl Velocity {
     fn new(x: f32, y: f32) -> Self {
@@ -43,7 +53,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, register_resetfn))
         .add_systems(
             FixedUpdate,
             (
@@ -51,6 +61,7 @@ fn main() {
                 spawn_asteroids,
                 player_input,
                 move_objects,
+                check_collision,
                 apply_drag,
             )
                 .chain(),
@@ -61,14 +72,31 @@ fn main() {
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(Camera2d);
 
-    let mut spaceship = commands.spawn((
-        Sprite::from_image(asset_server.load("Sprites/spaceship.png")),
-        Transform::from_scale(Vec3::new(0.3, 0.3, 0.3)),
-    ));
+    let mut spaceship_sprite = Sprite::from_image(asset_server.load("Sprites/spaceship.png"));
+    spaceship_sprite.custom_size = Some(Vec2::new(SPACESHIP_SIZE, SPACESHIP_SIZE));
+
+    let mut spaceship = commands.spawn(spaceship_sprite);
 
     spaceship.insert(Spaceship);
     spaceship.insert(Velocity::new(0.0, 0.0));
     spaceship.insert(HasDrag);
+}
+
+fn register_resetfn(mut commands: Commands) {
+    let system_id = commands.register_system(reset_game);
+    commands.insert_resource(ResetGame(system_id));
+}
+
+fn reset_game(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    all_objects: Query<Entity, With<Transform>>,
+) {
+    for entity in all_objects.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    setup(commands, asset_server);
 }
 
 fn spawn_asteroids(
@@ -126,13 +154,12 @@ fn spawn_asteroids(
         let speed = rng.random_range(ASTROID_SPEED_MIN..ASTROID_SPEED_MAX);
         let velocity = direction.normalize() * speed;
 
-        let transform =
-            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::new(0.3, 0.3, 0.3));
+        let mut asteroid_sprite = Sprite::from_image(asset_server.load("Sprites/asteroid.png"));
+        asteroid_sprite.custom_size = Some(Vec2::new(ASTROID_SIZE, ASTROID_SIZE));
 
-        let mut asteroid = commands.spawn((
-            Sprite::from_image(asset_server.load("Sprites/asteroid.png")),
-            transform,
-        ));
+        let transform = Transform::from_xyz(spawn_x, spawn_y, 0.0);
+
+        let mut asteroid = commands.spawn((asteroid_sprite, transform));
 
         asteroid.insert(Velocity::new(velocity.x, velocity.y));
 
@@ -209,5 +236,25 @@ fn apply_drag(mut objects: Query<&mut Transform, With<HasDrag>>) {
     for mut transform in objects.iter_mut() {
         transform.translation.x = transform.translation.x * DRAG;
         transform.translation.y = transform.translation.y * DRAG;
+    }
+}
+
+fn check_collision(
+    spaceship_query: Query<&Transform, With<Spaceship>>,
+    asteroid_query: Query<&Transform, With<Asteroid>>,
+    reset_fn: Res<ResetGame>,
+    mut commands: Commands,
+) {
+    let spaceship_transform = spaceship_query.single();
+
+    for astroid_transform in asteroid_query.iter() {
+        let distance_between = spaceship_transform
+            .translation
+            .truncate()
+            .distance(astroid_transform.translation.truncate());
+        if distance_between < (SPACESHIP_SIZE / 2.0 + ASTROID_SIZE / 2.0 - COLLISION_MARIGN) {
+            info!("collision!");
+            commands.run_system(reset_fn.0);
+        }
     }
 }
