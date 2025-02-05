@@ -1,9 +1,6 @@
-use bevy::ecs::system::{RunSystemOnce, SystemId};
-use bevy::math::vec2;
-use bevy::render::render_resource::encase::private::SizeValue;
-use bevy::state::commands;
+use bevy::ecs::system::SystemId;
 use bevy::window::{Window, WindowMode};
-use bevy::{prelude::*, transform, window::PrimaryWindow};
+use bevy::{prelude::*, window::PrimaryWindow};
 use rand::Rng;
 
 const SPACESHIP_ACCELERATION: f32 = 1.0;
