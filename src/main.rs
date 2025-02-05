@@ -9,10 +9,13 @@ use rand::Rng;
 const SPACESHIP_ACCELERATION: f32 = 1.0;
 const DRAG: f32 = 0.96;
 const ASTEROID_COUNT: usize = 10;
+const ASTEROID_DIFICULTY_SCALING: usize = 2; // for every N points one extra astroids get's added
+const STARTS_COUNT: usize = 3;
 const ASTROID_SPEED_MIN: f32 = 1.5;
 const ASTROID_SPEED_MAX: f32 = 4.0;
 const SPACESHIP_SIZE: f32 = 50.0;
 const ASTROID_SIZE: f32 = 80.0;
+const STAR_SIZE: f32 = 40.0;
 const COLLISION_MARIGN: f32 = 25.0; // tolerance granted in overlap before it is defined as a collision
 
 #[derive(Component)]
@@ -20,6 +23,12 @@ struct Spaceship;
 
 #[derive(Component)]
 struct Asteroid;
+
+#[derive(Component)]
+struct Star;
+
+#[derive(Component)]
+struct StarScoreText;
 
 #[derive(Component)]
 struct HasDrag;
@@ -37,6 +46,9 @@ struct Velocity {
 
 #[derive(Resource)]
 struct ResetGame(SystemId);
+
+#[derive(Resource)]
+struct StarScore(u32);
 
 impl Velocity {
     fn new(x: f32, y: f32) -> Self {
@@ -59,14 +71,17 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, (setup, register_resetfn))
+        .add_systems(Startup, (setup, init_resources))
         .add_systems(
             FixedUpdate,
             (
                 destroy_asteroids,
                 spawn_asteroids,
+                spawn_stars,
                 player_input,
                 move_objects,
+                collect_stars,
+                update_scoreboard,
                 check_collision,
                 apply_drag,
             )
@@ -93,22 +108,39 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         Velocity::new(0.0, 0.0),
         HasDrag,
     ));
+
+    commands.spawn((
+        Text::new("Score: 0"),
+        TextFont::from_font_size(50.0),
+        TextColor(Color::srgb(255.0 / 255.0, 215.0 / 255.0, 0.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(5.0),
+            left: Val::Px(15.0),
+            ..default()
+        },
+        StarScoreText,
+    ));
 }
 
-fn register_resetfn(mut commands: Commands) {
+fn init_resources(mut commands: Commands) {
     let system_id = commands.register_system(reset_game);
     commands.insert_resource(ResetGame(system_id));
+
+    commands.insert_resource(StarScore(0));
 }
 
 fn reset_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     all_objects: Query<Entity, With<Transform>>,
+    mut score: ResMut<StarScore>,
 ) {
     for entity in all_objects.iter() {
         commands.entity(entity).despawn();
     }
 
+    score.0 = 0;
     setup(commands, asset_server);
 }
 
@@ -116,11 +148,14 @@ fn spawn_asteroids(
     mut commands: Commands,
     asteroids: Query<&Asteroid>,
     asset_server: Res<AssetServer>,
+    score: Res<StarScore>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let mut total_asteroids = asteroids.iter().count();
 
-    while total_asteroids < ASTEROID_COUNT {
+    let asteroid_target = ASTEROID_COUNT + ((score.0 as usize) / ASTEROID_DIFICULTY_SCALING);
+
+    while total_asteroids < asteroid_target {
         let mut rng = rand::rng();
         let window = windows.single();
         let width = window.width();
@@ -183,6 +218,59 @@ fn spawn_asteroids(
 
         total_asteroids += 1;
     }
+}
+
+fn spawn_stars(
+    mut commands: Commands,
+    stars: Query<&Star>,
+    asset_server: Res<AssetServer>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+) {
+    let mut total_stars = stars.iter().count();
+
+    while total_stars < STARTS_COUNT {
+        let mut rng = rand::rng();
+        let window = windows.single();
+        let width = window.width();
+        let height = window.height();
+
+        // random point on screen with 150px margin from edge
+        let point_x = rng.random_range(-width / 2.0 + 150.0..width / 2.0 - 150.0);
+        let point_y = rng.random_range(-height / 2.0 + 150.0..height / 2.0 - 150.0);
+
+        let transform = Transform::from_translation(Vec3::new(point_x, point_y, -1.0));
+
+        let mut star_sprite = Sprite::from_image(asset_server.load("Sprites/star.png"));
+        star_sprite.custom_size = Some(Vec2::new(STAR_SIZE, STAR_SIZE));
+
+        commands.spawn((star_sprite, transform, Star));
+
+        total_stars += 1;
+    }
+}
+
+fn collect_stars(
+    spaceship_query: Query<&Transform, With<Spaceship>>,
+    star_query: Query<(Entity, &Transform), With<Star>>,
+    mut commands: Commands,
+    mut score: ResMut<StarScore>,
+) {
+    let spaceship_transform = spaceship_query.single();
+
+    for (star_entity, star_transform) in star_query.iter() {
+        let distance_between = spaceship_transform
+            .translation
+            .truncate()
+            .distance(star_transform.translation.truncate());
+        if distance_between < (SPACESHIP_SIZE / 2.0 + STAR_SIZE / 2.0) {
+            commands.entity(star_entity).despawn();
+            score.0 += 1;
+        }
+    }
+}
+
+fn update_scoreboard(mut scoreboard: Query<&mut Text, With<StarScoreText>>, score: Res<StarScore>) {
+    scoreboard.single_mut().0 = format!("Score: {:?}", score.0);
 }
 
 fn destroy_asteroids(
@@ -281,7 +369,6 @@ fn check_collision(
             .truncate()
             .distance(astroid_transform.translation.truncate());
         if distance_between < (SPACESHIP_SIZE / 2.0 + ASTROID_SIZE / 2.0 - COLLISION_MARIGN) {
-            info!("collision!");
             commands.run_system(reset_fn.0);
         }
     }
