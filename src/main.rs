@@ -126,6 +126,13 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
         StarScoreText,
     ));
+
+    // create background
+    let transform = Transform::from_xyz(0.0, 0.0, -10.0);
+    commands.spawn((
+        Sprite::from_image(asset_server.load("Sprites/background.png")),
+        transform,
+    ));
 }
 
 fn init_resources(mut commands: Commands) {
