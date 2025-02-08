@@ -13,6 +13,8 @@ const ASTROID_SPEED_MAX: f32 = 4.0;
 const SPACESHIP_SIZE: f32 = 50.0;
 const ASTROID_SIZE: f32 = 80.0;
 const STAR_SIZE: f32 = 40.0;
+const JET_STREAM_SIZE: f32 = 15.0;
+const JET_DENSITY: usize = 7; // amount of jet stream entities spawned per game tick.
 const COLLISION_MARIGN: f32 = 25.0; // tolerance granted in overlap before it is defined as a collision
 
 #[derive(Component)]
@@ -23,6 +25,11 @@ struct Asteroid;
 
 #[derive(Component)]
 struct Star;
+
+#[derive(Component)]
+struct JetStream {
+    alive_time: f32,
+}
 
 #[derive(Component)]
 struct StarScoreText;
@@ -81,6 +88,7 @@ fn main() {
                 update_scoreboard,
                 check_collision,
                 apply_drag,
+                destroy_jet_stream,
             )
                 .chain(),
         )
@@ -299,6 +307,8 @@ fn player_input(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
 ) {
     let window = windows.single();
     let (camera, cam_transform) = cameras.single();
@@ -321,6 +331,36 @@ fn player_input(
                 let acceleration = direction.normalize() * SPACESHIP_ACCELERATION;
 
                 spaceship_speed.accelerate(acceleration);
+
+                let mut rng = rand::rng();
+                for _i in 0..JET_DENSITY {
+                    // spawn jet stream
+                    let mut jet_stream_sprite =
+                        Sprite::from_image(asset_server.load("Sprites/jet-stream.png"));
+                    jet_stream_sprite.custom_size =
+                        Some(Vec2::new(JET_STREAM_SIZE, JET_STREAM_SIZE));
+
+                    let jet_stream_transform = Transform::from_translation(
+                        spaceship_transform.translation
+                            - direction.normalize().extend(0.0) * (SPACESHIP_SIZE / 2.0),
+                    );
+
+                    let mut velocity = -direction.normalize() * rng.random_range(8.0..12.0);
+                    let rotation_angle = rng.random_range(-0.2..0.2); // Generate random angle in radians
+                    velocity = velocity.rotate(Vec2::from_angle(rotation_angle));
+
+                    commands.spawn((
+                        jet_stream_sprite,
+                        jet_stream_transform,
+                        Velocity::new(velocity.x, velocity.y),
+                        CurrentPosition(jet_stream_transform.translation.truncate()),
+                        TargetPosition(jet_stream_transform.translation.truncate()),
+                        HasDrag,
+                        JetStream {
+                            alive_time: rng.random_range(30.0..60.0),
+                        },
+                    ));
+                }
             }
         }
     }
@@ -367,6 +407,15 @@ fn check_collision(
             .distance(astroid_transform.translation.truncate());
         if distance_between < (SPACESHIP_SIZE / 2.0 + ASTROID_SIZE / 2.0 - COLLISION_MARIGN) {
             commands.run_system(reset_fn.0);
+        }
+    }
+}
+
+fn destroy_jet_stream(mut commands: Commands, mut jet_stream: Query<(Entity, &mut JetStream)>) {
+    for (entity, mut jet) in jet_stream.iter_mut() {
+        jet.alive_time = jet.alive_time - 1.0;
+        if jet.alive_time < 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }
